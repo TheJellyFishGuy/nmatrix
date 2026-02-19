@@ -11,15 +11,21 @@ import (
 	"golang.org/x/term"
 )
 
-var speed = flag.Int("speed", 35, "speed in ms (lower = faster)")
+var speed = flag.Int("speed", 25, "frame speed ms")
+var density = flag.Float64("density", 0.7, "rain density 0.1-1.0")
 
-var charset = []rune("アイウエオカキクケコサシスセソABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+var chars = []rune("アイウエオカキクケコサシスセソワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 type Drop struct {
-	y      int
+	head   float64
 	length int
-	speed  int
+	vel    float64
+	active bool
 }
+
+var buffer [][]int
+var width, height int
+var drops []Drop
 
 func main() {
 
@@ -27,24 +33,12 @@ func main() {
 
 	rand.Seed(time.Now().UnixNano())
 
-	width, height, _ := term.GetSize(int(os.Stdout.Fd()))
-
-	drops := make([]Drop, width)
-
-	for i := range drops {
-
-		drops[i] = Drop{
-			y:      rand.Intn(height),
-			length: rand.Intn(height/2) + 5,
-			speed:  rand.Intn(3) + 1,
-		}
-	}
+	initScreen()
 
 	hideCursor()
-	clear()
-
 	defer showCursor()
 	defer reset()
+	defer clear()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -60,88 +54,166 @@ func main() {
 
 		case <-ticker.C:
 
-			draw(width, height, drops)
-
-			update(height, drops)
-
+			checkResize()
+			update()
+			render()
 		}
 	}
 }
 
-func draw(width, height int, drops []Drop) {
+func initScreen() {
 
-	fmt.Print("\033[H")
+	width, height, _ = term.GetSize(int(os.Stdout.Fd()))
 
-	for x := 0; x < width; x++ {
+	buffer = make([][]int, height)
 
-		d := drops[x]
-
-		for i := 0; i < d.length; i++ {
-
-			y := d.y - i
-
-			if y < 0 || y >= height {
-				continue
-			}
-
-			move(x+1, y+1)
-
-			char := string(charset[rand.Intn(len(charset))])
-
-			if i == 0 {
-
-				fmt.Print("\033[97m", char) // bright white head
-
-			} else if i < 3 {
-
-				fmt.Print("\033[92m", char)
-
-			} else {
-
-				fmt.Print("\033[32m", char)
-			}
-		}
+	for y := range buffer {
+		buffer[y] = make([]int, width)
 	}
 
-	reset()
-}
-
-func update(height int, drops []Drop) {
+	drops = make([]Drop, width)
 
 	for i := range drops {
 
-		drops[i].y += drops[i].speed
+		if rand.Float64() < *density {
 
-		if drops[i].y-drops[i].length > height {
-
-			drops[i].y = 0
-			drops[i].length = rand.Intn(height/2) + 5
-			drops[i].speed = rand.Intn(3) + 1
+			drops[i] = newDrop()
 		}
 	}
 }
 
-func move(x, y int) {
+func newDrop() Drop {
 
-	fmt.Printf("\033[%d;%dH", y, x)
+	return Drop{
+		head:   rand.Float64() * float64(height),
+		length: rand.Intn(height/2) + 6,
+		vel:    rand.Float64()*0.5 + 0.5,
+		active: true,
+	}
+}
+
+func update() {
+
+	// fade buffer
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+
+			if buffer[y][x] > 0 {
+				buffer[y][x]--
+			}
+		}
+	}
+
+	// update drops
+
+	for x := range drops {
+
+		d := &drops[x]
+
+		if !d.active {
+
+			if rand.Float64() < 0.002 {
+
+				drops[x] = newDrop()
+			}
+
+			continue
+		}
+
+		d.head += d.vel
+
+		for i := 0; i < d.length; i++ {
+
+			y := int(d.head) - i
+
+			if y >= 0 && y < height {
+
+				buffer[y][x] = 255 - (i * 20)
+
+				if buffer[y][x] < 20 {
+					buffer[y][x] = 20
+				}
+			}
+		}
+
+		if int(d.head)-d.length > height {
+
+			d.active = false
+		}
+	}
+}
+
+func render() {
+
+	fmt.Print("\033[H")
+
+	for y := 0; y < height; y++ {
+
+		for x := 0; x < width; x++ {
+
+			v := buffer[y][x]
+
+			if v == 0 {
+
+				fmt.Print(" ")
+
+				continue
+			}
+
+			color(v)
+
+			fmt.Print(string(chars[rand.Intn(len(chars))]))
+		}
+
+		fmt.Print("\n")
+	}
+}
+
+func color(v int) {
+
+	switch {
+
+	case v > 220:
+		fmt.Print("\033[97m")
+
+	case v > 180:
+		fmt.Print("\033[92m")
+
+	case v > 120:
+		fmt.Print("\033[32m")
+
+	case v > 60:
+		fmt.Print("\033[32;2m")
+
+	default:
+		fmt.Print("\033[30;1m")
+	}
+}
+
+func checkResize() {
+
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+
+	if w != width || h != height {
+
+		clear()
+		initScreen()
+	}
 }
 
 func clear() {
-
 	fmt.Print("\033[2J")
 }
 
 func hideCursor() {
-
 	fmt.Print("\033[?25l")
 }
 
 func showCursor() {
-
 	fmt.Print("\033[?25h")
 }
 
 func reset() {
-
 	fmt.Print("\033[0m")
 }
