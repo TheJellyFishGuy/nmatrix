@@ -1,0 +1,13 @@
+{
+    "version": "1.0",
+    "description": "cmatrix for git!!",
+    "homepage": "https://github.com/TheJellyFishGuy/nmatrix",
+    "license": "MIT",
+
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/TheJellyFishGuy/nmatrix/releases/download/v1.0/nmatrix.exe",
+            "bin": "nmatrix.exe"
+        }
+    }
+}
